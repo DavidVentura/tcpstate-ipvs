@@ -7,12 +7,13 @@ This repository will also de-reference the virtual IP from IPVS connections to t
 Running the example, you get something like this
 
 ```
-got = TcpSocketEvent { oldstate: Close, newstate: SynSent, sport: 0, dport: 33, dst: 1.2.3.4 }
-[2024-09-22T17:26:35Z INFO  ipvs_tcpstate] cport 47758 vport 33 dport 22
-[2024-09-22T17:26:35Z INFO  ipvs_tcpstate] daddr args 16951488
-[2024-09-22T17:26:35Z INFO  ipvs_tcpstate] caddr param 2432870592
-got = TcpSocketEvent { oldstate: SynSent, newstate: Established, sport: 47758, dport: 33, dst: 1.2.3.4 }
-
+# TCP transition 1 Close -> SynSent -- `dst` is virtual; unclear what the real IP is
+got = TcpSocketEvent { oldstate: Close, newstate: SynSent, sport: 0, dport: 33, dst: 1.2.3.4, svc: None }
+# TCP Transition 2 SynSent -> Established -- `dst` is virtual, but `svc.daddr` contains the real IP
+got = TcpSocketEvent { oldstate: SynSent, newstate: Established, sport: 36572, dport: 33, dst: 1.2.3.4, svc: Some(IpvsDest { daddr: 192.168.2.1, dport: 22 }) }
+got = TcpSocketEvent { oldstate: Established, newstate: FinWait1, sport: 36572, dport: 33, dst: 1.2.3.4, svc: Some(IpvsDest { daddr: 192.168.2.1, dport: 22 }) }
+got = TcpSocketEvent { oldstate: FinWait1, newstate: FinWait2, sport: 36572, dport: 33, dst: 1.2.3.4, svc: Some(IpvsDest { daddr: 192.168.2.1, dport: 22 }) }
+got = TcpSocketEvent { oldstate: FinWait2, newstate: Close, sport: 36572, dport: 33, dst: 1.2.3.4, svc: Some(IpvsDest { daddr: 192.168.2.1, dport: 22 }) }
 ```
 
 ## Prerequisites

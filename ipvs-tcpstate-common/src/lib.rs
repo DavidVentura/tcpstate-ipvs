@@ -7,9 +7,15 @@ pub struct TcpSocketEvent {
     pub sport: u16,
     pub dport: u16,
     pub dst: IpAddr,
+    pub svc: Option<IpvsDest>,
     // would it be useful to have comm (16 chars of task name) here?
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct IpvsDest {
+    pub daddr: IpAddr,
+    pub dport: u16,
+}
 #[repr(u8)]
 #[derive(Debug)]
 pub enum TcpState {

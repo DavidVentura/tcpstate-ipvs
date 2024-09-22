@@ -16,14 +16,28 @@ use crate::tracepoint::trace_event_raw_inet_sock_set_state;
 use aya_ebpf::maps::PerfEventArray;
 use aya_ebpf::EbpfContext;
 use aya_ebpf::{
-    helpers, macros::kprobe, macros::map, macros::tracepoint, programs::ProbeContext,
-    programs::TracePointContext,
+    helpers, macros::kprobe, macros::map, macros::tracepoint, maps::HashMap,
+    programs::ProbeContext, programs::TracePointContext,
 };
 use aya_log_ebpf::info;
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use ipvs_tcpstate_common::{Family, TcpSocketEvent, AF_INET, AF_INET6};
+use ipvs_tcpstate_common::{Family, IpvsDest, TcpSocketEvent, TcpState, AF_INET, AF_INET6};
+
+#[map]
+static IPVS_TCP_MAP: HashMap<TcpKey, IpvsDest> = HashMap::with_max_entries(1024, 0);
 
 const IPPROTO_TCP: u16 = 6;
+
+struct TcpKey {
+    // TCP source port
+    sport: u16,
+    // TCP dest port  (virtual)
+    vport: u16,
+    // TCP source address
+    saddr: u32,
+    // TCP dest address (virtual)
+    vaddr: u32,
+}
 
 #[map]
 pub static mut TCP_EVENTS: PerfEventArray<TcpSocketEvent> =
@@ -105,12 +119,32 @@ fn make_ev(
         Family::IPv6 => ip6,
     };
 
+    let key = &TcpKey {
+        sport: evt.sport,
+        vport: evt.dport,
+        saddr: u32::from_be_bytes(evt.saddr),
+        vaddr: u32::from_be_bytes(evt.daddr),
+    };
+
+    info!(
+        ctx,
+        "getting sp {} vp {} sa {} va {}", key.sport, key.vport, key.saddr, key.vaddr
+    );
+
+    let newstate: TcpState = evt.newstate.into();
+    let v = unsafe { IPVS_TCP_MAP.get(key) }.copied();
+
+    if let TcpState::Close = newstate {
+        IPVS_TCP_MAP.remove(key).unwrap();
+    }
+
     let ev = TcpSocketEvent {
         oldstate: evt.oldstate.into(),
-        newstate: evt.newstate.into(),
+        newstate,
         sport: evt.sport,
         dport: evt.dport,
         dst: ip,
+        svc: v, //None, // unsafe { IPVS_TCP_MAP.get(key) }
     };
     Ok(ev)
 }
@@ -166,8 +200,29 @@ fn try_ip_vs_conn_new(ctx: &ProbeContext) -> Result<u32, u32> {
             1u32
         })?
     };
+    let vaddr = unsafe {
+        helpers::bpf_probe_read_kernel(&(*conn.vaddr)).map_err(|x| {
+            info!(ctx, "got err {}", x);
+            1u32
+        })?
+    };
+    let key = &TcpKey {
+        sport: u16::from_be(conn.cport),
+        vport: u16::from_be(conn.vport),
+        saddr: u32::from_be(unsafe { caddr.ip }),
+        vaddr: u32::from_be(unsafe { vaddr.ip }),
+    };
+    let value = &IpvsDest {
+        daddr: IpAddr::V4(Ipv4Addr::from_bits(u32::from_be(unsafe { daddr.ip }))),
+        dport: u16::from_be(dport),
+    };
+    IPVS_TCP_MAP.insert(key, value, 0).unwrap();
 
     info!(ctx, "caddr param {}", unsafe { (caddr).ip });
+    info!(
+        ctx,
+        "inserting sp {} vp {} sa {} va {}", key.sport, key.vport, key.saddr, key.vaddr
+    );
 
     Ok(0)
 }
