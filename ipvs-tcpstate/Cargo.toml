@@ -1,0 +1,20 @@
+[package]
+name = "ipvs_tcpstate"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+aya = "0.12"
+aya-log = "0.2"
+ipvs-tcpstate-common = { path = "../ipvs-tcpstate-common" }
+anyhow = "1"
+env_logger = "0.10"
+libc = "0.2"
+log = "0.4"
+tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "net", "signal", "sync"] }
+bytes = "1.7.2"
+
+[lib]
+name = "ipvs_tcpstate"
+path = "src/lib.rs"
