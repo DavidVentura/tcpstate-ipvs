@@ -1,23 +1,6 @@
 #![no_std]
 use core::net::IpAddr;
 
-/*
-#[repr(C)]
-pub struct TcpRetransmitSkb {
-    pub ent: trace_entry,
-    pub skbaddr: *const c_void,
-    pub skaddr: *const c_void,
-    pub state: i32,
-    pub sport: u16,
-    pub dport: u16,
-    pub family: u16,
-    pub saddr: [u8; 4],
-    pub daddr: [u8; 4],
-    pub saddr_v6: [u8; 16],
-    pub daddr_v6: [u8; 16],
-}
-*/
-
 #[derive(Debug)]
 pub struct TcpSocketEvent {
     pub oldstate: TcpState,
@@ -25,7 +8,7 @@ pub struct TcpSocketEvent {
     pub sport: u16,
     pub dport: u16,
     pub dst: IpAddr,
-    pub svc: Option<IpvsDest>,
+    pub svc: IpvsDest,
     // would it be useful to have comm (16 chars of task name) here?
 }
 

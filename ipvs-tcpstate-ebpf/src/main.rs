@@ -72,7 +72,7 @@ fn make_retrans_ev(evt: &TcpRetransmitSkb, key: &TcpKey) -> Result<Option<TcpSoc
         sport: evt.sport,
         dport: evt.dport,
         dst: IpAddr::V4(ip),
-        svc: v,
+        svc: v.unwrap(),
     };
     Ok(Some(ev))
 }
@@ -112,10 +112,11 @@ fn try_tcp_set_state(ctx: TracePointContext) -> Result<i64, i64> {
     if evt.protocol != IPPROTO_TCP {
         return Ok(0);
     }
-    let ev = make_ev(&ctx, evt)?;
-    unsafe {
-        #[allow(static_mut_refs)]
-        TCP_EVENTS.output(&ctx, &ev, 0);
+    if let Some(ev) = make_ev(&ctx, evt)? {
+        unsafe {
+            #[allow(static_mut_refs)]
+            TCP_EVENTS.output(&ctx, &ev, 0);
+        }
     }
 
     Ok(0)
@@ -123,9 +124,21 @@ fn try_tcp_set_state(ctx: TracePointContext) -> Result<i64, i64> {
 fn make_ev(
     ctx: &TracePointContext,
     evt: &trace_event_raw_inet_sock_set_state,
-) -> Result<TcpSocketEvent, i32> {
-    //let pid = helpers::bpf_get_current_pid_tgid() >> 32;
-    //let comm = helpers::bpf_get_current_comm();
+) -> Result<Option<TcpSocketEvent>, i32> {
+    let key = &TcpKey {
+        sport: evt.sport,
+        vport: evt.dport,
+        saddr: u32::from_be_bytes(evt.saddr),
+        vaddr: u32::from_be_bytes(evt.daddr),
+    };
+    // Only push out events if we know about the connection
+    // from an IPVS perspective
+    let v = unsafe { IPVS_TCP_MAP.get(key) }.copied();
+    if v.is_none() {
+        return Ok(None);
+    }
+    let v = v.unwrap();
+
     let family = match evt.family {
         AF_INET => Family::IPv4,
         AF_INET6 => Family::IPv6,
@@ -174,13 +187,6 @@ fn make_ev(
         Family::IPv6 => ip6,
     };
 
-    let key = &TcpKey {
-        sport: evt.sport,
-        vport: evt.dport,
-        saddr: u32::from_be_bytes(evt.saddr),
-        vaddr: u32::from_be_bytes(evt.daddr),
-    };
-
     /*
     info!(
         ctx,
@@ -189,7 +195,6 @@ fn make_ev(
     */
 
     let newstate: TcpState = evt.newstate.into();
-    let v = unsafe { IPVS_TCP_MAP.get(key) }.copied();
 
     if let TcpState::Close = newstate {
         IPVS_TCP_MAP.remove(key).unwrap();
@@ -203,7 +208,7 @@ fn make_ev(
         dst: ip,
         svc: v,
     };
-    Ok(ev)
+    Ok(Some(ev))
 }
 #[kprobe]
 pub fn ip_vs_conn_new(ctx: ProbeContext) -> u32 {
