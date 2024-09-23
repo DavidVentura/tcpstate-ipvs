@@ -28,6 +28,8 @@ TcpSocketEvent { oldstate: SynSent, newstate: SynSent, sport: 43782, dport: 33, 
 TcpSocketEvent { oldstate: SynSent, newstate: Close, sport: 43782, dport: 33, dst: 1.2.3.4, svc: Some(IpvsDest { daddr: 8.8.8.8, dport: 33 }) }
 ```
 
+This library does *not* return TcpSocketEvents where the svc is unknown, which filters out all non-IPVS events, but also the `Close->SynSent` transition.
+
 ## Prerequisites
 
 1. Install bpf-linker: `cargo install bpf-linker`
