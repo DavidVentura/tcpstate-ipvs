@@ -12,7 +12,7 @@ include!(concat!(env!("OUT_DIR"), "/ipvs_bindings.rs"));
 #[allow(dead_code)]
 mod tracepoint;
 
-use crate::tracepoint::trace_event_raw_inet_sock_set_state;
+use crate::tracepoint::{trace_event_raw_inet_sock_set_state, TcpRetransmitSkb};
 use aya_ebpf::maps::PerfEventArray;
 use aya_ebpf::EbpfContext;
 use aya_ebpf::{
@@ -28,6 +28,9 @@ static IPVS_TCP_MAP: HashMap<TcpKey, IpvsDest> = HashMap::with_max_entries(1024,
 
 const IPPROTO_TCP: u16 = 6;
 
+// rustc marks these as deadcode but they are definitely
+// used for keying the hashmap
+#[allow(dead_code)]
 struct TcpKey {
     // TCP source port
     sport: u16,
@@ -42,6 +45,58 @@ struct TcpKey {
 #[map]
 pub static mut TCP_EVENTS: PerfEventArray<TcpSocketEvent> =
     PerfEventArray::with_max_entries(1024, 0);
+
+#[tracepoint]
+pub fn tcp_retransmit_skb(ctx: TracePointContext) -> i64 {
+    match try_tcp_retransmit_skb(&ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn make_retrans_ev(evt: &TcpRetransmitSkb, key: &TcpKey) -> Result<Option<TcpSocketEvent>, i64> {
+    let v = unsafe { IPVS_TCP_MAP.get(&key) }.copied();
+    if v.is_none() {
+        // This is a null-pointer check - the verifier does not
+        // approve this program without it, even though
+        // it should be fine to return svc: None
+        return Ok(None);
+    }
+
+    let ip = Ipv4Addr::from(u32::from_be_bytes(evt.daddr));
+    // This is always SynSent
+    let state: TcpState = TcpState::SynSent;
+    let ev = TcpSocketEvent {
+        oldstate: state,
+        newstate: state,
+        sport: evt.sport,
+        dport: evt.dport,
+        dst: IpAddr::V4(ip),
+        svc: v,
+    };
+    Ok(Some(ev))
+}
+fn try_tcp_retransmit_skb(ctx: &TracePointContext) -> Result<i64, i64> {
+    let evt_ptr = ctx.as_ptr() as *const TcpRetransmitSkb;
+    let evt = unsafe { evt_ptr.as_ref().ok_or(1i64)? };
+    let state: TcpState = evt.state.into();
+    // We only care about connection opening, to detect timeouts
+    if let TcpState::SynSent = state {
+        let key = TcpKey {
+            sport: evt.sport,
+            vport: evt.dport,
+            saddr: u32::from_be_bytes(evt.saddr),
+            vaddr: u32::from_be_bytes(evt.daddr),
+        };
+        if let Ok(Some(evt)) = make_retrans_ev(evt, &key) {
+            unsafe {
+                #[allow(static_mut_refs)]
+                TCP_EVENTS.output(ctx, &evt, 0);
+            }
+        }
+    }
+    Ok(0)
+}
 
 #[tracepoint]
 pub fn tcp_set_state(ctx: TracePointContext) -> i64 {
@@ -126,10 +181,12 @@ fn make_ev(
         vaddr: u32::from_be_bytes(evt.daddr),
     };
 
+    /*
     info!(
         ctx,
         "getting sp {} vp {} sa {} va {}", key.sport, key.vport, key.saddr, key.vaddr
     );
+    */
 
     let newstate: TcpState = evt.newstate.into();
     let v = unsafe { IPVS_TCP_MAP.get(key) }.copied();
@@ -144,7 +201,7 @@ fn make_ev(
         sport: evt.sport,
         dport: evt.dport,
         dst: ip,
-        svc: v, //None, // unsafe { IPVS_TCP_MAP.get(key) }
+        svc: v,
     };
     Ok(ev)
 }
@@ -172,6 +229,7 @@ fn try_ip_vs_conn_new(ctx: &ProbeContext) -> Result<u32, u32> {
         return Ok(0);
     }
     let dport: u16 = ctx.arg(3).ok_or(0u32)?;
+    /*
     info!(
         ctx,
         "cport {} vport {} dport {}",
@@ -179,12 +237,9 @@ fn try_ip_vs_conn_new(ctx: &ProbeContext) -> Result<u32, u32> {
         u16::from_be(conn.vport),
         u16::from_be(dport)
     );
+    */
 
     let daddr_ptr: *const nf_inet_addr = ctx.arg(2).ok_or(0u32)?;
-    /*
-    let daddr: *const nf_inet_addr = ctx.arg(2).ok_or(0u32)?;
-    info!(ctx, "daddr ipv4 {}", unsafe { (*daddr).ip });
-    */
     let daddr = unsafe {
         helpers::bpf_probe_read_kernel(&(*daddr_ptr)).map_err(|x| {
             info!(ctx, "got err {}", x);
@@ -192,7 +247,7 @@ fn try_ip_vs_conn_new(ctx: &ProbeContext) -> Result<u32, u32> {
         })?
     };
 
-    info!(ctx, "daddr args {}", unsafe { daddr.ip });
+    //info!(ctx, "daddr args {}", unsafe { daddr.ip });
 
     let caddr = unsafe {
         helpers::bpf_probe_read_kernel(&(*conn.caddr)).map_err(|x| {
@@ -218,11 +273,13 @@ fn try_ip_vs_conn_new(ctx: &ProbeContext) -> Result<u32, u32> {
     };
     IPVS_TCP_MAP.insert(key, value, 0).unwrap();
 
+    /*
     info!(ctx, "caddr param {}", unsafe { (caddr).ip });
     info!(
         ctx,
         "inserting sp {} vp {} sa {} va {}", key.sport, key.vport, key.saddr, key.vaddr
     );
+    */
 
     Ok(0)
 }

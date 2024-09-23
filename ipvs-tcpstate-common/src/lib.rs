@@ -1,5 +1,23 @@
 #![no_std]
 use core::net::IpAddr;
+
+/*
+#[repr(C)]
+pub struct TcpRetransmitSkb {
+    pub ent: trace_entry,
+    pub skbaddr: *const c_void,
+    pub skaddr: *const c_void,
+    pub state: i32,
+    pub sport: u16,
+    pub dport: u16,
+    pub family: u16,
+    pub saddr: [u8; 4],
+    pub daddr: [u8; 4],
+    pub saddr_v6: [u8; 16],
+    pub daddr_v6: [u8; 16],
+}
+*/
+
 #[derive(Debug)]
 pub struct TcpSocketEvent {
     pub oldstate: TcpState,
@@ -17,7 +35,7 @@ pub struct IpvsDest {
     pub dport: u16,
 }
 #[repr(u8)]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum TcpState {
     Established = 1,
     SynSent = 2,

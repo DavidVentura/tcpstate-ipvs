@@ -28,6 +28,14 @@ impl ConnectionWatcher {
         ipvs_conn.load()?;
         ipvs_conn.attach("ip_vs_conn_new", 0)?;
 
+        let tcp_retrans: &mut TracePoint = self
+            .bpf
+            .program_mut("tcp_retransmit_skb")
+            .unwrap()
+            .try_into()?;
+        tcp_retrans.load()?;
+        tcp_retrans.attach("tcp", "tcp_retransmit_skb")?;
+
         watch_tcp_events(events).await
     }
 }

@@ -58,3 +58,18 @@ pub struct trace_event_raw_inet_sock_set_state {
     pub __data: __IncompleteArrayField<::aya_ebpf::cty::c_char>,
 }
 
+#[repr(C)]
+// FIXME generate
+pub struct TcpRetransmitSkb {
+    pub ent: trace_entry,
+    pub skbaddr: *const ::aya_ebpf::cty::c_void,
+    pub skaddr: *const ::aya_ebpf::cty::c_void,
+    pub state: i32,
+    pub sport: u16,
+    pub dport: u16,
+    pub family: u16,
+    pub saddr: [u8; 4],
+    pub daddr: [u8; 4],
+    pub saddr_v6: [u8; 16],
+    pub daddr_v6: [u8; 16],
+}
