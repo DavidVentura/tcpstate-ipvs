@@ -12,7 +12,10 @@ include!(concat!(env!("OUT_DIR"), "/ipvs_bindings.rs"));
 #[allow(dead_code)]
 mod tracepoint;
 
-use crate::tracepoint::{trace_event_raw_inet_sock_set_state, TcpRetransmitSkb};
+use crate::tracepoint::{
+    trace_event_raw_inet_sock_set_state, trace_event_raw_tcp_event_sk,
+    trace_event_raw_tcp_event_sk_skb,
+};
 use aya_ebpf::maps::PerfEventArray;
 use aya_ebpf::EbpfContext;
 use aya_ebpf::{
@@ -53,8 +56,32 @@ pub fn tcp_retransmit_skb(ctx: TracePointContext) -> i64 {
         Err(ret) => ret,
     }
 }
+fn try_tcp_retransmit_skb(ctx: &TracePointContext) -> Result<i64, i64> {
+    let evt_ptr = ctx.as_ptr() as *const trace_event_raw_tcp_event_sk_skb;
+    let evt = unsafe { evt_ptr.as_ref().ok_or(1i64)? };
+    let state: TcpState = evt.state.into();
+    // We only care about connection opening, to detect timeouts
+    if let TcpState::SynSent = state {
+        let key = TcpKey {
+            sport: evt.sport,
+            vport: evt.dport,
+            saddr: u32::from_be_bytes(evt.saddr),
+            vaddr: u32::from_be_bytes(evt.daddr),
+        };
+        if let Ok(Some(evt)) = make_retrans_ev(evt, &key) {
+            unsafe {
+                #[allow(static_mut_refs)]
+                TCP_EVENTS.output(ctx, &evt, 0);
+            }
+        }
+    }
+    Ok(0)
+}
 
-fn make_retrans_ev(evt: &TcpRetransmitSkb, key: &TcpKey) -> Result<Option<TcpSocketEvent>, i64> {
+fn make_retrans_ev(
+    evt: &trace_event_raw_tcp_event_sk_skb,
+    key: &TcpKey,
+) -> Result<Option<TcpSocketEvent>, i64> {
     let v = unsafe { IPVS_TCP_MAP.get(&key) }.copied();
     if v.is_none() {
         // This is a null-pointer check - the verifier does not
@@ -76,25 +103,30 @@ fn make_retrans_ev(evt: &TcpRetransmitSkb, key: &TcpKey) -> Result<Option<TcpSoc
     };
     Ok(Some(ev))
 }
-fn try_tcp_retransmit_skb(ctx: &TracePointContext) -> Result<i64, i64> {
-    let evt_ptr = ctx.as_ptr() as *const TcpRetransmitSkb;
-    let evt = unsafe { evt_ptr.as_ref().ok_or(1i64)? };
-    let state: TcpState = evt.state.into();
-    // We only care about connection opening, to detect timeouts
-    if let TcpState::SynSent = state {
-        let key = TcpKey {
-            sport: evt.sport,
-            vport: evt.dport,
-            saddr: u32::from_be_bytes(evt.saddr),
-            vaddr: u32::from_be_bytes(evt.daddr),
-        };
-        if let Ok(Some(evt)) = make_retrans_ev(evt, &key) {
-            unsafe {
-                #[allow(static_mut_refs)]
-                TCP_EVENTS.output(ctx, &evt, 0);
-            }
-        }
+#[tracepoint]
+pub fn tcp_receive_reset(ctx: TracePointContext) -> i64 {
+    match try_tcp_receive_reset(&ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
     }
+}
+
+fn try_tcp_receive_reset(ctx: &TracePointContext) -> Result<i64, i64> {
+    let evt_ptr = ctx.as_ptr() as *const trace_event_raw_tcp_event_sk;
+    let evt = unsafe { evt_ptr.as_ref().ok_or(1i64)? };
+    let key = &TcpKey {
+        sport: evt.sport,
+        vport: evt.dport,
+        saddr: u32::from_be_bytes(evt.saddr),
+        vaddr: u32::from_be_bytes(evt.daddr),
+    };
+    let v = unsafe { IPVS_TCP_MAP.get(key) }.copied();
+    if v.is_none() {
+        return Ok(0);
+    }
+    let mut v = v.unwrap();
+    v.received_rst = true;
+    IPVS_TCP_MAP.insert(key, &v, 0).unwrap();
     Ok(0)
 }
 
@@ -275,6 +307,7 @@ fn try_ip_vs_conn_new(ctx: &ProbeContext) -> Result<u32, u32> {
     let value = &IpvsDest {
         daddr: IpAddr::V4(Ipv4Addr::from_bits(u32::from_be(unsafe { daddr.ip }))),
         dport: u16::from_be(dport),
+        received_rst: false,
     };
     IPVS_TCP_MAP.insert(key, value, 0).unwrap();
 

@@ -32,6 +32,7 @@ impl<T> ::core::fmt::Debug for __IncompleteArrayField<T> {
 }
 pub type __u8 = ::aya_ebpf::cty::c_uchar;
 pub type __u16 = ::aya_ebpf::cty::c_ushort;
+pub type __u64 = ::aya_ebpf::cty::c_ulonglong;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct trace_entry {
@@ -57,19 +58,35 @@ pub struct trace_event_raw_inet_sock_set_state {
     pub daddr_v6: [__u8; 16usize],
     pub __data: __IncompleteArrayField<::aya_ebpf::cty::c_char>,
 }
-
 #[repr(C)]
-// FIXME generate
-pub struct TcpRetransmitSkb {
+#[derive(Debug)]
+pub struct trace_event_raw_tcp_event_sk_skb {
     pub ent: trace_entry,
     pub skbaddr: *const ::aya_ebpf::cty::c_void,
     pub skaddr: *const ::aya_ebpf::cty::c_void,
-    pub state: i32,
-    pub sport: u16,
-    pub dport: u16,
-    pub family: u16,
-    pub saddr: [u8; 4],
-    pub daddr: [u8; 4],
-    pub saddr_v6: [u8; 16],
-    pub daddr_v6: [u8; 16],
+    pub state: ::aya_ebpf::cty::c_int,
+    pub sport: __u16,
+    pub dport: __u16,
+    pub family: __u16,
+    pub saddr: [__u8; 4usize],
+    pub daddr: [__u8; 4usize],
+    pub saddr_v6: [__u8; 16usize],
+    pub daddr_v6: [__u8; 16usize],
+    pub __data: __IncompleteArrayField<::aya_ebpf::cty::c_char>,
 }
+#[repr(C)]
+#[derive(Debug)]
+pub struct trace_event_raw_tcp_event_sk {
+    pub ent: trace_entry,
+    pub skaddr: *const ::aya_ebpf::cty::c_void,
+    pub sport: __u16,
+    pub dport: __u16,
+    pub family: __u16,
+    pub saddr: [__u8; 4usize],
+    pub daddr: [__u8; 4usize],
+    pub saddr_v6: [__u8; 16usize],
+    pub daddr_v6: [__u8; 16usize],
+    pub sock_cookie: __u64,
+    pub __data: __IncompleteArrayField<::aya_ebpf::cty::c_char>,
+}
+
