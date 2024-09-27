@@ -65,7 +65,7 @@ RUST_LOG=info cargo xtask run
 ## Generate headers
 
 ```bash
-$ aya-tool generate trace_event_raw_inet_sock_set_state trace_event_raw_tcp_event_sk_skb trace_event_raw_tcp_event_sk > tracepoint.rs
+$ aya-tool generate trace_event_raw_inet_sock_set_state trace_event_raw_tcp_event_sk_skb trace_event_raw_tcp_event_sk > tracepoint_gen.rs
 ```
 
 `trace_event_raw_inet_sock_set_state` comes from

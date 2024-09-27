@@ -8,6 +8,7 @@ fn main() {
     let bindings = bindgen::Builder::default()
         .allowlist_type("ip_vs_conn_param")
         .allowlist_type("nf_inet_addr")
+        .allowlist_type("sock")
         .opaque_type("netns_ipvs")
         .opaque_type("ip_vs_pe")
         .use_core()

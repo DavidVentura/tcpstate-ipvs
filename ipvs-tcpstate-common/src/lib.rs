@@ -8,12 +8,13 @@ pub struct TcpSocketEvent {
     pub sport: u16,
     pub dport: u16,
     pub dst: IpAddr,
-    pub svc: IpvsDest,
+    pub svc: Option<IpvsDest>,
     // would it be useful to have comm (16 chars of task name) here?
 }
 
 #[derive(Debug)]
 pub enum Event {
+    Open,
     ClientClosed,
     ClientClosedWithoutEstablishing,
     ServerClosed,
@@ -24,12 +25,13 @@ pub enum Event {
 impl TcpSocketEvent {
     pub fn interpret(&self) -> Option<Event> {
         match (self.oldstate, self.newstate) {
+            (TcpState::Close, TcpState::SynSent) => Some(Event::Open),
             (TcpState::SynSent, TcpState::SynSent) => Some(Event::SlowEstablishing),
             (TcpState::Established, TcpState::CloseWait) => Some(Event::ServerClosed),
             // maybe finwait1/finwait2 as well? if we miss this event somehow
             (TcpState::Established, TcpState::FinWait1) => Some(Event::ClientClosed),
-            // Hook into receive RST? otherwise "giving up on establishment" is the same
-            (TcpState::SynSent, TcpState::Close) => match self.svc.received_rst {
+            // svc is only None on Close -> SynSent
+            (TcpState::SynSent, TcpState::Close) => match self.svc.unwrap().received_rst {
                 true => Some(Event::ServerRefused),
                 false => Some(Event::ClientClosedWithoutEstablishing),
             },

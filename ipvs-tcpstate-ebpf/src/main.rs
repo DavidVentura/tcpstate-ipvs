@@ -10,9 +10,9 @@ include!(concat!(env!("OUT_DIR"), "/ipvs_bindings.rs"));
 #[allow(non_snake_case)]
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
-mod tracepoint;
+mod tracepoint_gen;
 
-use crate::tracepoint::{
+use crate::tracepoint_gen::{
     trace_event_raw_inet_sock_set_state, trace_event_raw_tcp_event_sk,
     trace_event_raw_tcp_event_sk_skb,
 };
@@ -99,7 +99,7 @@ fn make_retrans_ev(
         sport: evt.sport,
         dport: evt.dport,
         dst: IpAddr::V4(ip),
-        svc: v.unwrap(),
+        svc: Some(v.unwrap()),
     };
     Ok(Some(ev))
 }
@@ -111,6 +111,8 @@ pub fn tcp_receive_reset(ctx: TracePointContext) -> i64 {
     }
 }
 
+// Update the entry in IPVS_TCP_MAP to set `received_rst` flag
+// This event executes before `tcp_set_state`
 fn try_tcp_receive_reset(ctx: &TracePointContext) -> Result<i64, i64> {
     let evt_ptr = ctx.as_ptr() as *const trace_event_raw_tcp_event_sk;
     let evt = unsafe { evt_ptr.as_ref().ok_or(1i64)? };
@@ -219,13 +221,6 @@ fn make_ev(
         Family::IPv6 => ip6,
     };
 
-    /*
-    info!(
-        ctx,
-        "getting sp {} vp {} sa {} va {}", key.sport, key.vport, key.saddr, key.vaddr
-    );
-    */
-
     let newstate: TcpState = evt.newstate.into();
 
     if let TcpState::Close = newstate {
@@ -238,10 +233,62 @@ fn make_ev(
         sport: evt.sport,
         dport: evt.dport,
         dst: ip,
-        svc: v,
+        svc: Some(v),
     };
     Ok(Some(ev))
 }
+#[kprobe]
+pub fn tcp_connect(ctx: ProbeContext) -> u32 {
+    match try_tcp_connect(&ctx) {
+        Ok(ev) => {
+            unsafe {
+                #[allow(static_mut_refs)]
+                TCP_EVENTS.output(&ctx, &ev, 0);
+            }
+            0
+        }
+        Err(ret) => {
+            info!(&ctx, "tcp_conn err code {}", ret);
+            ret
+        }
+    }
+}
+
+// This function is only useful to trace the precise moment on which a connection
+// _attempts_ establishment.
+// This is because `tcp_set_state` with newstate=SynSent is called _before_
+// establishing the identity of the connection (ie: assigning a source port)
+// See:
+// https://github.com/torvalds/linux/blob/v6.11/net/ipv4/tcp_ipv4.c#L294
+// tcp_connect is called here:
+// https://github.com/torvalds/linux/blob/v6.11/net/ipv4/tcp_ipv4.c#L337
+// critically, after `inet_hash_connect`, which assigns the source port.
+fn try_tcp_connect(ctx: &ProbeContext) -> Result<TcpSocketEvent, u32> {
+    let conn_ptr: *const sock = ctx.arg(0).ok_or(0u32)?;
+
+    let sk_comm = unsafe {
+        helpers::bpf_probe_read_kernel(&((*conn_ptr).__sk_common)).map_err(|x| {
+            info!(ctx, "got err {}", x);
+            1u32
+        })?
+    };
+    let sport = unsafe { sk_comm.__bindgen_anon_3.__bindgen_anon_1.skc_num };
+    let dport = unsafe { sk_comm.__bindgen_anon_3.__bindgen_anon_1.skc_dport };
+
+    let ip4daddr = unsafe { sk_comm.__bindgen_anon_1.__bindgen_anon_1.skc_daddr };
+
+    let ip = IpAddr::V4(Ipv4Addr::from_bits(u32::from_be(ip4daddr)));
+    let ev = TcpSocketEvent {
+        oldstate: TcpState::Close,
+        newstate: TcpState::SynSent,
+        sport, //: u16::from_be(sport),
+        dport: u16::from_be(dport),
+        dst: ip,
+        svc: None,
+    };
+    Ok(ev)
+}
+
 #[kprobe]
 pub fn ip_vs_conn_new(ctx: ProbeContext) -> u32 {
     match try_ip_vs_conn_new(&ctx) {
@@ -266,15 +313,6 @@ fn try_ip_vs_conn_new(ctx: &ProbeContext) -> Result<u32, u32> {
         return Ok(0);
     }
     let dport: u16 = ctx.arg(3).ok_or(0u32)?;
-    /*
-    info!(
-        ctx,
-        "cport {} vport {} dport {}",
-        u16::from_be(conn.cport),
-        u16::from_be(conn.vport),
-        u16::from_be(dport)
-    );
-    */
 
     let daddr_ptr: *const nf_inet_addr = ctx.arg(2).ok_or(0u32)?;
     let daddr = unsafe {
@@ -283,8 +321,6 @@ fn try_ip_vs_conn_new(ctx: &ProbeContext) -> Result<u32, u32> {
             1u32
         })?
     };
-
-    //info!(ctx, "daddr args {}", unsafe { daddr.ip });
 
     let caddr = unsafe {
         helpers::bpf_probe_read_kernel(&(*conn.caddr)).map_err(|x| {
@@ -310,14 +346,6 @@ fn try_ip_vs_conn_new(ctx: &ProbeContext) -> Result<u32, u32> {
         received_rst: false,
     };
     IPVS_TCP_MAP.insert(key, value, 0).unwrap();
-
-    /*
-    info!(ctx, "caddr param {}", unsafe { (caddr).ip });
-    info!(
-        ctx,
-        "inserting sp {} vp {} sa {} va {}", key.sport, key.vport, key.saddr, key.vaddr
-    );
-    */
 
     Ok(0)
 }

@@ -28,6 +28,10 @@ impl ConnectionWatcher {
         ipvs_conn.load()?;
         ipvs_conn.attach("ip_vs_conn_new", 0)?;
 
+        let tcp_conn: &mut KProbe = self.bpf.program_mut("tcp_connect").unwrap().try_into()?;
+        tcp_conn.load()?;
+        tcp_conn.attach("tcp_connect", 0)?;
+
         let tcp_retrans: &mut TracePoint = self
             .bpf
             .program_mut("tcp_retransmit_skb")
