@@ -272,6 +272,13 @@ fn try_tcp_connect(ctx: &ProbeContext) -> Result<TcpSocketEvent, u32> {
             1u32
         })?
     };
+    // By definition, `tcp_connect` is called with SynSent state
+    // This `if` will never trigger -- it is here only to make the
+    // expected precondition explicit
+    if sk_comm.skc_state != TcpState::SynSent as u8 {
+        return Err(1);
+    }
+
     let sport = unsafe { sk_comm.__bindgen_anon_3.__bindgen_anon_1.skc_num };
     let dport = unsafe { sk_comm.__bindgen_anon_3.__bindgen_anon_1.skc_dport };
 
@@ -281,7 +288,7 @@ fn try_tcp_connect(ctx: &ProbeContext) -> Result<TcpSocketEvent, u32> {
     let ev = TcpSocketEvent {
         oldstate: TcpState::Close,
         newstate: TcpState::SynSent,
-        sport, //: u16::from_be(sport),
+        sport,
         dport: u16::from_be(dport),
         dst: ip,
         svc: None,
