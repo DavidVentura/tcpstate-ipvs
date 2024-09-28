@@ -30,6 +30,83 @@ TcpSocketEvent { oldstate: SynSent, newstate: Close, sport: 43782, dport: 33, ds
 
 This library does *not* return TcpSocketEvents where the svc is unknown, which filters out all non-IPVS events, but also the `Close->SynSent` transition.
 
+## Diagrams
+
+The behavior of the tracepoints / kprobes in this library can be explained with these diagrams:
+
+Establishing a connection
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Kernel
+    participant Server
+
+    Client->>Kernel: Initiate connection
+    Kernel->>Server: SYN
+    Kernel->>+Kernel: tcp_connect (kprobe)
+    Note over Kernel: Emit `State: Open` event
+    Server->>Kernel: SYN-ACK
+    Kernel->>+Kernel: tcp_set_state (tracepoint)
+    Kernel->>Client: SYN-ACK
+    Client->>Kernel: ACK
+    Kernel->>+Kernel: tcp_set_state (tracepoint)
+    Note over Kernel: Emit `State: Established` event
+    Kernel->>Server: ACK
+```
+
+Server refuses the connection
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Kernel
+    participant Server
+
+    Client->>Kernel: Initiate connection
+    Kernel->>Server: SYN
+    Kernel->>+Kernel: tcp_connect (kprobe)
+    Note over Kernel: Emit `State: Open` event
+    Server->>Kernel: RST
+    Kernel->>+Kernel: tcp_receive_reset (tracepoint)
+    Note over Kernel: Store 'connection reset' flag
+    Kernel->>+Kernel: tcp_set_state (tracepoint)
+    Note over Kernel: Emit `State: ServerRefused` event
+    Kernel->>Client: Connection refused
+```
+
+Server unreachable
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Kernel
+    participant Server
+
+    Client->>Kernel: Initiate connection
+    Kernel->>+Kernel: tcp_connect (kprobe)
+    Note over Kernel: Emit `State: Open` event
+    Kernel->>Server: SYN
+    Note over Kernel: No response
+    loop Retransmission
+        Kernel->>+Kernel: tcp_retransmit_skb (tracepoint)
+        Note over Kernel: Emit `State: SlowEstablishing` event
+    end
+    Kernel->>+Kernel: tcp_set_state (tracepoint)
+    Note over Kernel: Emit `State: ClientClosedWithoutEstablishing` event
+    Kernel->>Client: Connection timed out
+```
+
+Client closes connection
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Kernel
+    participant Server
+
+    Note over Client,Server: Established connection
+    Client->>Kernel: Close connection
+    Kernel->>+Kernel: tcp_set_state (tracepoint)
+    Note over Kernel: Emit `State: ClientClosed` event
+```
+
 ## Prerequisites
 
 1. Install bpf-linker: `cargo install bpf-linker`
