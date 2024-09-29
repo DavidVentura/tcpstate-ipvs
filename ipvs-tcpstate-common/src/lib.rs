@@ -1,7 +1,7 @@
 #![no_std]
 use core::net::IpAddr;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TcpSocketEvent {
     pub oldstate: TcpState,
     pub newstate: TcpState,
@@ -12,7 +12,7 @@ pub struct TcpSocketEvent {
     // would it be useful to have comm (16 chars of task name) here?
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Event {
     Open,
     ClientClosed,
@@ -40,14 +40,24 @@ impl TcpSocketEvent {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IpvsDest {
     pub daddr: IpAddr,
     pub dport: u16,
     pub received_rst: bool,
 }
+
+#[derive(Debug)]
+pub enum Family {
+    IPv4,
+    // Not supporting IPv6 for now
+}
+
+pub const AF_INET: u16 = 2;
+pub const AF_INET6: u16 = 10;
+
 #[repr(u8)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TcpState {
     Established = 1,
     SynSent = 2,
@@ -63,15 +73,6 @@ pub enum TcpState {
     NewSynRecv = 12,
     Unknown,
 }
-
-#[derive(Debug)]
-pub enum Family {
-    IPv4,
-    IPv6,
-}
-
-pub const AF_INET: u16 = 2;
-pub const AF_INET6: u16 = 10;
 
 impl From<i32> for TcpState {
     fn from(value: i32) -> Self {

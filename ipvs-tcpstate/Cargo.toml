@@ -12,8 +12,12 @@ anyhow = "1"
 env_logger = "0.10"
 libc = "0.2"
 log = "0.4"
-tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "net", "signal", "sync"] }
+# time is only for test
+tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "net", "signal", "sync", "time"] }
 bytes = "1.7.2"
+
+[dev-dependencies]
+ipvs = { path = "../../ipvs" }
 
 [lib]
 name = "ipvs_tcpstate"

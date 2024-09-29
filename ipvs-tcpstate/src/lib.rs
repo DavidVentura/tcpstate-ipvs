@@ -19,11 +19,6 @@ impl ConnectionWatcher {
         })
     }
     pub async fn get_events(&mut self) -> Result<mpsc::Receiver<TcpSocketEvent>, anyhow::Error> {
-        let program: &mut TracePoint = self.bpf.program_mut("tcp_set_state").unwrap().try_into()?;
-        program.load()?;
-        program.attach("sock", "inet_sock_set_state")?;
-        let events: AsyncPerfEventArray<_> = self.bpf.take_map("TCP_EVENTS").unwrap().try_into()?;
-
         let ipvs_conn: &mut KProbe = self.bpf.program_mut("ip_vs_conn_new").unwrap().try_into()?;
         ipvs_conn.load()?;
         ipvs_conn.attach("ip_vs_conn_new", 0)?;
@@ -31,6 +26,11 @@ impl ConnectionWatcher {
         let tcp_conn: &mut KProbe = self.bpf.program_mut("tcp_connect").unwrap().try_into()?;
         tcp_conn.load()?;
         tcp_conn.attach("tcp_connect", 0)?;
+
+        let program: &mut TracePoint = self.bpf.program_mut("tcp_set_state").unwrap().try_into()?;
+        program.load()?;
+        program.attach("sock", "inet_sock_set_state")?;
+        let events: AsyncPerfEventArray<_> = self.bpf.take_map("TCP_EVENTS").unwrap().try_into()?;
 
         let tcp_retrans: &mut TracePoint = self
             .bpf
