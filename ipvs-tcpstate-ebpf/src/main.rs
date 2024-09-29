@@ -23,7 +23,7 @@ use aya_ebpf::{
     programs::ProbeContext, programs::TracePointContext,
 };
 use aya_log_ebpf::info;
-use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use core::net::{IpAddr, Ipv4Addr};
 use ipvs_tcpstate_common::{Family, IpvsDest, TcpSocketEvent, TcpState, AF_INET, AF_INET6};
 
 #[map]
@@ -173,53 +173,26 @@ fn make_ev(
     }
     let v = v.unwrap();
 
-    let family = match evt.family {
+    match evt.family {
         AF_INET => Family::IPv4,
-        AF_INET6 => Family::IPv6,
+        AF_INET6 => {
+            // not supporting IPv6 for now
+            return Ok(None);
+        }
         other => {
             info!(ctx, "unknown family {}", other);
             return Err(-999);
         }
     };
-    let mut ip_bytes: [u8; 16] = [0; 16];
 
-    if let Family::IPv6 = family {
-        ip_bytes[..16].copy_from_slice(&evt.daddr_v6);
-    }
-
-    // The verifier can't verify this if i put it inside a `match` :'(
-    // if family != Ipv6, `ip6` contains garbage, but is not returned
-    let ip6 = IpAddr::V6(Ipv6Addr::from_bits(
-        (ip_bytes[0] as u128) << 120
-            | (ip_bytes[1] as u128) << 112
-            | (ip_bytes[2] as u128) << 104
-            | (ip_bytes[3] as u128) << 96
-            | (ip_bytes[4] as u128) << 88
-            | (ip_bytes[5] as u128) << 80
-            | (ip_bytes[6] as u128) << 72
-            | (ip_bytes[7] as u128) << 64
-            | (ip_bytes[8] as u128) << 56
-            | (ip_bytes[9] as u128) << 48
-            | (ip_bytes[10] as u128) << 40
-            | (ip_bytes[11] as u128) << 32
-            | (ip_bytes[12] as u128) << 24
-            | (ip_bytes[13] as u128) << 16
-            | (ip_bytes[14] as u128) << 8
-            | (ip_bytes[15] as u128) << 0,
+    let mut ip_bytes: [u8; 4] = [0; 4];
+    ip_bytes.copy_from_slice(&evt.daddr);
+    let ip = IpAddr::V4(Ipv4Addr::new(
+        ip_bytes[0],
+        ip_bytes[1],
+        ip_bytes[2],
+        ip_bytes[3],
     ));
-    let ip = match family {
-        Family::IPv4 => {
-            ip_bytes[..4].copy_from_slice(&evt.daddr);
-            let ip4 = IpAddr::V4(Ipv4Addr::new(
-                ip_bytes[0],
-                ip_bytes[1],
-                ip_bytes[2],
-                ip_bytes[3],
-            ));
-            ip4
-        }
-        Family::IPv6 => ip6,
-    };
 
     let newstate: TcpState = evt.newstate.into();
 
@@ -266,17 +239,18 @@ pub fn tcp_connect(ctx: ProbeContext) -> u32 {
 fn try_tcp_connect(ctx: &ProbeContext) -> Result<TcpSocketEvent, u32> {
     let conn_ptr: *const sock = ctx.arg(0).ok_or(0u32)?;
 
-    let sk_comm = unsafe {
-        helpers::bpf_probe_read_kernel(&((*conn_ptr).__sk_common)).map_err(|x| {
-            info!(ctx, "got err {}", x);
-            1u32
-        })?
-    };
+    let sk_comm =
+        unsafe { helpers::bpf_probe_read_kernel(&((*conn_ptr).__sk_common)).map_err(|x| 999u32)? };
     // By definition, `tcp_connect` is called with SynSent state
     // This `if` will never trigger -- it is here only to make the
     // expected precondition explicit
     if sk_comm.skc_state != TcpState::SynSent as u8 {
-        return Err(1);
+        return Err(888);
+    }
+
+    if sk_comm.skc_family != AF_INET {
+        // Not supporting IPv6 for now
+        return Err(777);
     }
 
     let sport = unsafe { sk_comm.__bindgen_anon_3.__bindgen_anon_1.skc_num };
@@ -317,6 +291,10 @@ fn try_ip_vs_conn_new(ctx: &ProbeContext) -> Result<u32, u32> {
         })?
     };
     if conn.protocol != IPPROTO_TCP {
+        return Ok(0);
+    }
+    if conn.af != AF_INET {
+        // Not supporting IPv6 for now
         return Ok(0);
     }
     let dport: u16 = ctx.arg(3).ok_or(0u32)?;
