@@ -47,9 +47,6 @@ fn setup_ipvs() {
     c.create_service(&refused).unwrap();
     c.create_service(&dropped).unwrap();
 
-    for service in c.get_all_services().unwrap() {
-        println!("service {service:?}");
-    }
     let accept_dest = Destination {
         address: std::net::IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
         fwd_method: ForwardTypeFull::Masquerade,
@@ -87,22 +84,20 @@ async fn trace_direct_connection() {
         let mut watcher = ConnectionWatcher::new().unwrap();
         let mut rx = watcher.get_events().await.unwrap();
         let ev = rx.recv().await.unwrap();
-        println!("ev {:?}", ev);
         ev
     });
 
-    let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Could not bind to localhost. is loopback interface up?");
     let server_addr = server.local_addr().unwrap();
-    println!("listening on {:?}", server_addr);
     spawn(async move {
         spawn(async move {
             let client = TcpSocket::new_v4().unwrap();
-            let c = client.connect(server_addr).await.unwrap();
-            println!("connected");
+            let _ = client.connect(server_addr).await.unwrap();
         });
         loop {
-            let (socket, _) = server.accept().await.unwrap();
-            println!("accepted");
+            let (_, _) = server.accept().await.unwrap();
         }
     });
     let event = handle.await.unwrap();
@@ -125,22 +120,19 @@ async fn trace_ipvs_connection_accepted() {
     spawn(async move {
         spawn(async move {
             let client = TcpSocket::new_v4().unwrap();
-            let c = client
+            let _c = client
                 .connect(std::net::SocketAddr::V4(SocketAddrV4::new(
                     Ipv4Addr::new(127, 0, 0, 1),
                     33,
                 )))
                 .await
                 .unwrap();
-            println!("connected");
         });
         loop {
-            let (socket, _) = server.accept().await.unwrap();
-            println!("accepted");
+            let (_, _) = server.accept().await.unwrap();
         }
     });
     let event = rx.recv().await.unwrap();
-    println!("event {:?}", event);
     assert_eq!(event.oldstate, TcpState::Close);
     assert_eq!(event.newstate, TcpState::SynSent);
     assert_eq!(event.dport, 33); // Destination port, as seen by the client, is 33
@@ -150,7 +142,6 @@ async fn trace_ipvs_connection_accepted() {
     assert_eq!(event.interpret(), Some(Event::Open));
 
     let event = rx.recv().await.unwrap();
-    println!("event {:?}", event);
     assert_eq!(event.oldstate, TcpState::SynSent);
     assert_eq!(event.newstate, TcpState::Established);
     assert_eq!(event.dport, 33); // Destination port, as seen by the client, is 33
@@ -161,9 +152,10 @@ async fn trace_ipvs_connection_accepted() {
     assert_eq!(svc.dport, 1234);
     assert_eq!(svc.received_rst, false);
     assert_eq!(event.interpret(), None);
-    // ..
+    // client closes connection
     let event = rx.recv().await.unwrap();
-    println!("event {:?} {:?}", event, event.interpret());
+    assert_eq!(event.oldstate, TcpState::Established);
+    assert_eq!(event.newstate, TcpState::CloseWait);
 }
 
 #[tokio::test]
@@ -176,7 +168,7 @@ async fn trace_ipvs_connection_refused() {
     // no server = refused
     spawn(async move {
         let client = TcpSocket::new_v4().unwrap();
-        let c = client
+        let _c = client
             .connect(std::net::SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::new(127, 0, 0, 1),
                 33,
@@ -185,7 +177,6 @@ async fn trace_ipvs_connection_refused() {
             .unwrap_err();
     });
     let event = rx.recv().await.unwrap();
-    println!("event {:?}", event);
     assert_eq!(event.oldstate, TcpState::Close);
     assert_eq!(event.newstate, TcpState::SynSent);
     assert_eq!(event.dport, 33); // Destination port, as seen by the client, is 33
@@ -196,7 +187,6 @@ async fn trace_ipvs_connection_refused() {
 
     let event = rx.recv().await.unwrap();
     // refused
-    println!("event {:?}", event);
     assert_eq!(event.oldstate, TcpState::SynSent);
     assert_eq!(event.newstate, TcpState::Close);
     assert_eq!(event.dport, 33); // Destination port, as seen by the client, is 33
@@ -229,7 +219,6 @@ async fn trace_ipvs_connection_not_responding() {
             .unwrap_err();
     });
     let event = rx.recv().await.unwrap();
-    println!("event {:?}", event);
     assert_eq!(event.oldstate, TcpState::Close);
     assert_eq!(event.newstate, TcpState::SynSent);
     assert_eq!(event.dport, 55); // Destination port, as seen by the client
@@ -240,7 +229,6 @@ async fn trace_ipvs_connection_not_responding() {
 
     let event = rx.recv().await.unwrap();
     // slow
-    println!("event {:?}", event);
     assert_eq!(event.oldstate, TcpState::SynSent);
     assert_eq!(event.newstate, TcpState::SynSent);
     assert_eq!(event.dport, 55); // Destination port, as seen by the client
